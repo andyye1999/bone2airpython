@@ -1,0 +1,64 @@
+{
+    "seed": 0,
+    "description": "...des",
+    "root_dir": "F:\\yhc\\bone",
+    "cudnn_deterministic": false,
+    "trainer": {
+        "module": "trainer.trainer_eben5",
+        "main": "Trainer",
+        "epochs": 1000,
+        "save_checkpoint_interval": 5,
+        "validation": {
+            "interval": 5,
+            "find_max": true,
+            "custom": {
+                "visualize_audio_limit": 10,
+                "visualize_waveform_limit": 10,
+                "visualize_spectrogram_limit": 10,
+                "sample_length": 32000
+            }
+        }
+    },
+    "model": {
+        "module": "src.generator",
+        "main": "GeneratorEBEN",
+        "args": {"bands_nbr": 4,"pqmf_ks": 32}
+    },
+    "loss_function": {
+        "module": "model.loss",
+        "main": "generator_loss",
+        "args": {}
+    },
+    "optimizer": {
+        "lr": 0.001,
+        "beta1": 0.9,
+        "beta2": 0.999
+    },
+    "train_dataset": {
+        "module": "dataset.waveform_dataset_eben",
+        "main": "Dataset",
+        "args": {
+            "dataset": "F:\\yhc\\bone\\bonetrainset.txt",
+            "limit": null,
+            "offset": 0,
+            "sample_length": 32000,
+            "mode": "train"
+        }
+    },
+    "validation_dataset": {
+        "module": "dataset.waveform_dataset_eben",
+        "main": "Dataset",
+        "args": {
+            "dataset": "F:\\yhc\\bone\\bonetestset.txt",
+            "limit": 400,
+            "offset": 0,
+            "mode": "validation"
+        }
+    },
+    "train_dataloader": {
+        "batch_size": 8,
+        "num_workers": 0,
+        "shuffle": true,
+        "pin_memory": true
+    }
+}

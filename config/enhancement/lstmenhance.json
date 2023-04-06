@@ -1,0 +1,20 @@
+{
+    "model": {
+        "module": "model.BILSTM",
+        "main": "BILSTM3",
+        "args": {}
+    },
+    "dataset": {
+        "module": "dataset.waveform_dataset_enhancement",
+        "main": "WaveformDataset",
+        "args": {
+            "dataset": "/home/dsp/yhc/bone/ceshi.txt",
+            "limit": null,
+            "offset": 0,
+            "sample_length": 16320
+        }
+    },
+    "custom": {
+        "sample_length": 16320
+    }
+}
