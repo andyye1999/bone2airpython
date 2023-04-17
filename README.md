@@ -1,37 +1,10 @@
-# Wave-U-Net-for-Speech-Enhancement
+# bone2air
 
-Implement [Wave-U-Net](https://arxiv.org/abs/1806.03185) by PyTorch, and migrate it to the speech enhancement.
+dccrn dpcrn seanet eben sounstream
 
 ![](./doc/tensorboard.png)
 ![](./doc/audio.png)
 
-## Dependencies
-
-
-```shell
-# Make sure the /bin directory of CUDA be added to PATH enveriment variable
-# Install CUPTI included with CUDA by appending the LD_LIBRARY_PATH environment variable
-export PATH="/usr/local/cuda-10.0/bin:$PATH"
-export LD_LIBRARY_PATH="/usr/local/cuda-10.0/lib64:$LD_LIBRARY_PATH"
-
-# Install Anaconda, take Tsinghua mirror source and python 3.6.5 as an example
-wget https://mirrors.tuna.tsinghua.edu.cn/anaconda/archive/Anaconda3-5.2.0-Linux-x86_64.sh
-chmod a+x Anaconda3-5.2.0-Linux-x86_64.sh
-./Anaconda3-5.2.0-Linux-x86_64.sh # Press f to turn the page, the default installation is in ~/anaconda directory, the installation process will prompt to modify the PATH variable
-
-# Create a virtual environment
-conda create -n wave-u-net python=3
-conda activate wave-u-net
-
-# Install dependencies
-conda install pytorch torchvision cudatoolkit=10.0 -c pytorch  # Pytorch 1.2.0 version has been tested
-conda install tensorflow-gpu  # Only for tensorboard
-conda install matplotlib
-pip install tqdm librosa pystoi pesq
-
-# Clone
-git clone https://github.com/haoxiangsnr/Wave-U-Net-for-Speech-Enhancement.git
-```
 
 ## Usage
 
