@@ -5,10 +5,63 @@ import json5
 import numpy as np
 import torch
 from torch.optim.lr_scheduler import StepLR
-from torch.optim.lr_scheduler import CosineAnnealingLR
-
 from util import visualization
 from util.utils import prepare_empty_dir, ExecutionTime
+from src.generator import GeneratorEBEN
+from src.discriminator import DiscriminatorEBENMultiScales,MultiScaleDiscriminator
+from model.loss import cntloss,multiloss,tunetloss,generator_loss,discriminator_loss
+
+
+class generator_loss1(torch.nn.Module):
+    def __init__(self):
+        super(generator_loss1, self).__init__()
+        self.l1 = torch.nn.L1Loss()
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, reference_embeddings, enhanced_embeddings):
+        ftr_loss = 0
+        for scale in range(len(reference_embeddings)):  # across scales
+            for layer in range(1, len(reference_embeddings[scale]) - 1):  # across layers
+                a = reference_embeddings[scale][layer]
+                b = enhanced_embeddings[scale][layer]
+                ftr_loss += self.l1(a, b) / (len(reference_embeddings[scale]) - 2)
+        ftr_loss /= len(reference_embeddings)
+
+        # loss_adv_gen
+        adv_loss = 0
+        for scale in range(len(enhanced_embeddings)):  # across embeddings
+            certainties = enhanced_embeddings[scale][-1]
+            adv_loss += self.relu(1 - certainties).mean()  # across time
+        adv_loss /= len(enhanced_embeddings)
+
+        gen_loss = adv_loss + 100 * ftr_loss
+        return gen_loss
+
+class discriminator_loss1(torch.nn.Module):
+    def __init__(self):
+        super(discriminator_loss1, self).__init__()
+        self.l1 = torch.nn.L1Loss()
+        self.relu = torch.nn.ReLU()
+
+    def forward(self, reference_embeddings, enhanced_embeddings):
+        # valid_loss
+        adv_loss_valid = 0
+        for scale in range(len(reference_embeddings)):  # across embeddings
+            certainties = reference_embeddings[scale][-1]
+            adv_loss_valid += self.relu(1 - certainties).mean()  # across time
+        adv_loss_valid /= len(reference_embeddings)
+
+        # fake_loss
+        adv_loss_fake = 0
+        for scale in range(len(enhanced_embeddings)):  # across embeddings
+            certainties = enhanced_embeddings[scale][-1]
+            adv_loss_fake += self.relu(1 + certainties).mean()  # across time
+        adv_loss_fake /= len(enhanced_embeddings)
+
+        # loss to backprop on
+        dis_loss = adv_loss_valid + adv_loss_fake
+        return dis_loss
+
 
 class BaseTrainer:
     def __init__(self,
@@ -20,11 +73,20 @@ class BaseTrainer:
         self.n_gpu = torch.cuda.device_count()
         self.device = self._prepare_device(self.n_gpu, cudnn_deterministic=config["cudnn_deterministic"])
 
-        self.optimizer = optimizer
-        self.loss_function = loss_function
-
+        # self.generator = GeneratorEBEN(bands_nbr=4, pqmf_ks=32).to(self.device)
+        # self.model = GeneratorEBEN(bands_nbr=4, pqmf_ks=32).to(self.device)
+        self.discriminator = MultiScaleDiscriminator().to(self.device)
+        # weights = torch.load('F:\\yhc\\bone\\generator.ckpt')
+        # self.model.load_state_dict(weights)
+        self.loss1 = cntloss()
+        self.loss2 = discriminator_loss()
         self.model = model.to(self.device)
-
+        # self.model = self.generator
+        self.optimizer = torch.optim.Adam(params=self.model.parameters(), lr=0.0003, betas=(0.5, 0.9))
+        self.optimizer2 = torch.optim.Adam(params=self.discriminator.parameters(), lr=0.0003, betas=(0.5, 0.9))
+        # self.optimizer = self.optimizer1
+        self.loss_function = generator_loss()
+        self.lambda_adaptive_past = None
         if self.n_gpu > 1:
             self.model = torch.nn.DataParallel(self.model, device_ids=list(range(self.n_gpu))) # 多卡運行
 
@@ -35,6 +97,7 @@ class BaseTrainer:
         self.validation_interval = self.validation_config["interval"]
         self.find_max = self.validation_config["find_max"]
         self.validation_custom_config = self.validation_config["custom"]
+        self.step = 0
 
         # The following args is not in the config file. We will update it if the resume is True in later.
         self.start_epoch = 1
@@ -44,7 +107,6 @@ class BaseTrainer:
         self.logs_dir = self.root_dir / "logs"
         prepare_empty_dir([self.checkpoints_dir, self.logs_dir], resume=resume)
 
-        self.schedular = CosineAnnealingLR(self.optimizer,self.epochs,0.00001)
         self.writer = visualization.writer(self.logs_dir.as_posix())
         self.writer.add_text(
             tag="Configuration",
@@ -68,18 +130,29 @@ class BaseTrainer:
             To be careful at the loading. if the model is an instance of DataParallel, we need to set model.module.*
         """
         latest_model_path = self.checkpoints_dir.expanduser().absolute() / "latest_model.tar"
+        latest_modeldis_path = self.checkpoints_dir.expanduser().absolute() / "latest_modeldis.tar"
         assert latest_model_path.exists(), f"{latest_model_path} does not exist, can not load latest checkpoint."
+        assert latest_modeldis_path.exists(), f"{latest_modeldis_path} does not exist, can not load latest checkpoint."
 
         checkpoint = torch.load(latest_model_path.as_posix(), map_location=self.device)
+        checkpoint1 = torch.load(latest_modeldis_path.as_posix(), map_location=self.device)
 
         self.start_epoch = checkpoint["epoch"] + 1
         self.best_score = checkpoint["best_score"]
+        self.step = checkpoint1["step"]
         self.optimizer.load_state_dict(checkpoint["optimizer"])
+
+        self.optimizer2.load_state_dict(checkpoint1["optimizer"])
 
         if isinstance(self.model, torch.nn.DataParallel):
             self.model.module.load_state_dict(checkpoint["model"])
         else:
             self.model.load_state_dict(checkpoint["model"])
+
+        if isinstance(self.discriminator, torch.nn.DataParallel):
+            self.discriminator.module.load_state_dict(checkpoint1["model"])
+        else:
+            self.discriminator.load_state_dict(checkpoint1["model"])
 
         print(f"Model checkpoint loaded. Training will begin in {self.start_epoch} epoch.")
 
@@ -102,10 +175,22 @@ class BaseTrainer:
             "optimizer": self.optimizer.state_dict()
         }
 
+        state_dict1 = {
+            "epoch": epoch,
+            "best_score": self.best_score,
+            "optimizer": self.optimizer2.state_dict(),
+            "step": self.step
+        }
+
         if isinstance(self.model, torch.nn.DataParallel):  # Parallel
             state_dict["model"] = self.model.module.cpu().state_dict()
         else:
             state_dict["model"] = self.model.cpu().state_dict()
+
+        if isinstance(self.discriminator, torch.nn.DataParallel):  # Parallel
+            state_dict1["model"] = self.discriminator.module.cpu().state_dict()
+        else:
+            state_dict1["model"] = self.discriminator.cpu().state_dict()
 
         """
         Notes:
@@ -118,13 +203,18 @@ class BaseTrainer:
         """
         torch.save(state_dict, (self.checkpoints_dir / "latest_model.tar").as_posix())
         torch.save(state_dict["model"], (self.checkpoints_dir / f"model_{str(epoch).zfill(4)}.pth").as_posix())
+        torch.save(state_dict1, (self.checkpoints_dir / "latest_modeldis.tar").as_posix())
+        torch.save(state_dict1["model"], (self.checkpoints_dir / f"modeldis_{str(epoch).zfill(4)}.pth").as_posix())
+
         if is_best:
             print(f"\t Found best score in {epoch} epoch, saving...")
             torch.save(state_dict, (self.checkpoints_dir / "best_model.tar").as_posix())
+            torch.save(state_dict1, (self.checkpoints_dir / "best_modeldis.tar").as_posix())
 
         # Use model.cpu() or model.to("cpu") will migrate the model to CPU, at which point we need remigrate model back.
         # No matter tensor.cuda() or tensor.to("cuda"), if tensor in CPU, the tensor will not be migrated to GPU, but the model will.
         self.model.to(self.device)
+        self.discriminator.to(self.device)
 
     @staticmethod
     def _prepare_device(n_gpu: int, cudnn_deterministic=False):
@@ -194,6 +284,7 @@ class BaseTrainer:
             timer = ExecutionTime()
 
             self._set_models_to_train_mode()
+            self.discriminator.train()
             self._train_epoch(epoch)
 
             if self.save_checkpoint_interval != 0 and (epoch % self.save_checkpoint_interval == 0):
@@ -215,3 +306,31 @@ class BaseTrainer:
 
     def _validation_epoch(self, epoch):
         raise NotImplementedError
+
+    # the dynamic loss balancer
+    def compute_ema_lambda_adaptive(self, loss_recons, loss_adv):
+        """Compute a dynamic loss ponderation to minimize lambda*loss_recons+loss_adv
+        Args:
+            loss_recons: 1-element tensor corresponding to the feature matching loss
+            loss_adv: 1-element tensor corresponding to the adversarial loss
+        Return:
+           lambda_adaptive_past: the adaptive ponderation coefficient
+        """
+
+        beta = 0.99
+
+        # compute lambda_adaptive_t
+        grads_recons = \
+        torch.autograd.grad(outputs=loss_recons, inputs=self.model.last_conv.weight, retain_graph=True)[0]
+        grads_adv = \
+        torch.autograd.grad(outputs=loss_adv, inputs=self.model.last_conv.weight, retain_graph=True)[0]
+        lambda_adaptive_new = torch.norm(grads_adv) / (torch.norm(grads_recons) + 1e-4)
+
+        if self.lambda_adaptive_past is None:
+            self.lambda_adaptive_past = lambda_adaptive_new
+        else:  # Exponential Moving average
+            self.lambda_adaptive_past = beta * self.lambda_adaptive_past + (1 - beta) * lambda_adaptive_new
+
+        self.lambda_adaptive_past = torch.clamp(self.lambda_adaptive_past, 0.0, 1e4).detach()
+
+        return self.lambda_adaptive_past

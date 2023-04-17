@@ -177,6 +177,154 @@ def normalized_conv1d(*args, **kwargs):
 def normalized_conv_trans1d(*args, **kwargs):
     return nn.utils.weight_norm(nn.ConvTranspose1d(*args, **kwargs))
 
+class Generatorseanet(nn.Module):
+
+    def __init__(self):
+        """
+        Generator of seanet
+
+        """
+        super().__init__()
+
+
+        self.nl = nn.LeakyReLU(negative_slope=0.01)
+
+        self.first_conv = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=3,
+                                    padding='same', bias=False, padding_mode='reflect')
+
+        self.encoder_blocks = nn.ModuleList(
+            [EncBlock(out_channels=64, stride=2, nl=self.nl),
+             EncBlock(out_channels=128, stride=4, nl=self.nl),
+             EncBlock(out_channels=256, stride=8, nl=self.nl)])
+
+        self.latent_conv = nn.Sequential(self.nl,
+                                         normalized_conv1d(in_channels=256, out_channels=64,
+                                                           kernel_size=7, padding='same',
+                                                           bias=False, padding_mode='reflect'),
+                                         self.nl,
+                                         normalized_conv1d(in_channels=64, out_channels=256,
+                                                           kernel_size=7, padding='same',
+                                                           bias=False, padding_mode='reflect'),
+                                         self.nl)
+
+        self.decoder_blocks = nn.ModuleList(
+            [DecBlock(out_channels=128, stride=8, nl=self.nl),
+             DecBlock(out_channels=64, stride=4, nl=self.nl),
+             DecBlock(out_channels=32, stride=2, nl=self.nl)])
+
+        self.last_conv = nn.Conv1d(in_channels=32, out_channels=1, kernel_size=3,
+                                   padding='same', bias=False, padding_mode='reflect')
+
+    def forward(self, cut_audio):
+        """
+        Forward pass of generator.
+        Args:
+            cut_audio: in-ear speech signal
+        """
+
+        # PQMF analysis, for first band only
+        first_band = cut_audio
+
+        # First conv
+        x = self.first_conv(first_band)
+
+        # Encoder forward
+        x1 = self.encoder_blocks[0](self.nl(x))
+        x2 = self.encoder_blocks[1](self.nl(x1))
+        x3 = self.encoder_blocks[2](self.nl(x2))
+
+        # Latent forward
+        x = self.latent_conv(x3)
+
+        # Decoder forward
+        x = self.decoder_blocks[0](x, x3)
+        x = self.decoder_blocks[1](x, x2)
+        x = self.decoder_blocks[2](x, x1)
+
+        # Last conv
+        x = self.last_conv(x)
+
+        output = torch.tanh(x + first_band)
+
+
+        return output
+
+class Generatorseanet1(nn.Module):
+
+    def __init__(self):
+        """
+        Generator of seanet
+
+        """
+        super().__init__()
+
+
+        self.nl = nn.LeakyReLU(negative_slope=0.01)
+
+        self.first_conv = nn.Conv1d(in_channels=1, out_channels=32, kernel_size=7,
+                                    padding='same', bias=False, padding_mode='reflect')
+
+        self.encoder_blocks = nn.ModuleList(
+            [EncBlock(out_channels=64, stride=2, nl=self.nl),
+             EncBlock(out_channels=128, stride=2, nl=self.nl),
+             EncBlock(out_channels=256, stride=8, nl=self.nl),
+             EncBlock(out_channels=512, stride=8, nl=self.nl)])
+
+        self.latent_conv = nn.Sequential(self.nl,
+                                         normalized_conv1d(in_channels=512, out_channels=128,
+                                                           kernel_size=7, padding='same',
+                                                           bias=False, padding_mode='reflect'),
+                                         self.nl,
+                                         normalized_conv1d(in_channels=128, out_channels=512,
+                                                           kernel_size=7, padding='same',
+                                                           bias=False, padding_mode='reflect'),
+                                         self.nl)
+
+        self.decoder_blocks = nn.ModuleList(
+            [DecBlock(out_channels=256, stride=8, nl=self.nl),
+             DecBlock(out_channels=128, stride=8, nl=self.nl),
+             DecBlock(out_channels=64, stride=2, nl=self.nl),
+             DecBlock(out_channels=32, stride=2, nl=self.nl)])
+
+        self.last_conv = nn.Conv1d(in_channels=32, out_channels=1, kernel_size=7,
+                                   padding='same', bias=False, padding_mode='reflect')
+
+    def forward(self, cut_audio):
+        """
+        Forward pass of generator.
+        Args:
+            cut_audio: in-ear speech signal
+        """
+
+        # PQMF analysis, for first band only
+        first_band = cut_audio
+
+        # First conv
+        x = self.first_conv(first_band)
+
+        # Encoder forward
+        x1 = self.encoder_blocks[0](self.nl(x))
+        x2 = self.encoder_blocks[1](self.nl(x1))
+        x3 = self.encoder_blocks[2](self.nl(x2))
+        x4 = self.encoder_blocks[3](self.nl(x3))
+
+        # Latent forward
+        x = self.latent_conv(x4)
+
+        # Decoder forward
+        x = self.decoder_blocks[0](x, x4)
+        x = self.decoder_blocks[1](x, x3)
+        x = self.decoder_blocks[2](x, x2)
+        x = self.decoder_blocks[3](x, x1)
+
+        # Last conv
+        x = self.last_conv(x)
+
+        output = torch.tanh(x + first_band)
+
+
+        return output
+
 
 if __name__ == '__main__':
 

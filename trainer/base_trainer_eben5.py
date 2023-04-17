@@ -97,7 +97,7 @@ class BaseTrainer:
         self.validation_interval = self.validation_config["interval"]
         self.find_max = self.validation_config["find_max"]
         self.validation_custom_config = self.validation_config["custom"]
-        self.step = 0
+        self.step = 19000
 
         # The following args is not in the config file. We will update it if the resume is True in later.
         self.start_epoch = 1
@@ -139,6 +139,7 @@ class BaseTrainer:
 
         self.start_epoch = checkpoint["epoch"] + 1
         self.best_score = checkpoint["best_score"]
+        self.step = checkpoint1["step"]
         self.optimizer.load_state_dict(checkpoint["optimizer"])
 
         self.optimizer2.load_state_dict(checkpoint1["optimizer"])
@@ -177,7 +178,8 @@ class BaseTrainer:
         state_dict1 = {
             "epoch": epoch,
             "best_score": self.best_score,
-            "optimizer": self.optimizer2.state_dict()
+            "optimizer": self.optimizer2.state_dict(),
+            "step": self.step
         }
 
         if isinstance(self.model, torch.nn.DataParallel):  # Parallel

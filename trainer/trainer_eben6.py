@@ -3,13 +3,14 @@ import librosa.display
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import tqdm
 
-from trainer.base_trainer import BaseTrainer
+from trainer.base_trainer_eben6 import BaseTrainer
 from util.utils import compute_STOI, compute_PESQ
-from trainer.pipline import NetFeeder, Resynthesizer, line
-from util.utils import frame,pad,overlap_add
+from src.generator import GeneratorEBEN
+from src.discriminator import DiscriminatorEBENMultiScales
 plt.switch_backend('agg')
+
+WARMUP_ITERATIONS = 10000
 
 
 class Trainer(BaseTrainer):
@@ -27,26 +28,71 @@ class Trainer(BaseTrainer):
         self.train_data_loader = train_dataloader
         self.validation_data_loader = validation_dataloader
 
+
+
+
     def _train_epoch(self, epoch):
         loss_total = 0.0
-        for i, (mixture, clean) in enumerate(self.train_data_loader):
+        gen_loss_total = 0
+        dis_loss_total = 0
+        for i, (mixture, clean, name, max_bone, max_air) in enumerate(self.train_data_loader):
             mixture = mixture.to(self.device)
             clean = clean.to(self.device)
+            max_bone = max_bone.to(self.device)
+            max_air = max_air.to(self.device)
 
+            # mixture = self.model.cut_tensor(mixture)
+            # clean = self.model.cut_tensor(clean)
+            train_gen = self.step % 2 == 0
+            train_dsc = self.step % 2 == 1
+            # train_dsc = self.step % 2 == 1 self.step >= WARMUP_ITERATIONS
+            # train generator
             self.optimizer.zero_grad()
+            enhanced_speech = self.model(mixture)
 
-            output = self.model(mixture)
+            if train_gen:
+                # gen_loss = cnt_loss = self.loss1(clean, enhanced_speech)
+                # self.writer.add_scalar(f"Train/cntLoss", cnt_loss.item() , self.step)
 
-            loss = self.loss_function(output,clean)
-            loss.backward()
-            self.optimizer.step()
+                # decomposed_reference_speech = self.model.pqmf.forward(clean, 'analysis')
+                enhanced_embeddings = self.discriminator(enhanced_speech)
+                reference_embeddings = self.discriminator(clean)
 
-            loss_total += loss.item()
+                # gen_loss = self.loss_function(reference_embeddings, enhanced_embeddings)
+                adv_loss, ftr_loss = self.loss_function(reference_embeddings, enhanced_embeddings)
+                lamda = self.compute_ema_lambda_adaptive(ftr_loss,adv_loss)
+                gen_loss = adv_loss + lamda * ftr_loss
+                self.writer.add_scalar(f"Train/genLoss", gen_loss.item(), self.step)
+                self.writer.add_scalar(f"Train/adv_loss", adv_loss.item(), self.step)
+                self.writer.add_scalar(f"Train/ftr_loss", ftr_loss.item(), self.step)
 
-        self.schedular.step()
+                gen_loss_total += gen_loss.item()
+                # enhanced = self.model(mixture)
+                # loss = self.loss_function(clean, enhanced)
+                gen_loss.backward()
+                self.optimizer.step()
+            # train discriminator
+            if train_dsc:
+                self.optimizer2.zero_grad()
+                # enhanced_speech, decomposed_enhanced_speech = self.model(mixture)
+
+                enhanced_speech_detach = enhanced_speech.detach()
+
+                enhanced_embeddings = self.discriminator(enhanced_speech_detach)
+                reference_embeddings = self.discriminator(clean)
+                dis_loss = self.loss2(reference_embeddings, enhanced_embeddings)
+                dis_loss_total += dis_loss.item()
+                dis_loss.backward()
+                self.optimizer2.step()
+                self.writer.add_scalar(f"Train/disLoss", dis_loss.item(), self.step)
+
+            self.step += 1
+
         dl_len = len(self.train_data_loader)
-        self.writer.add_scalar(f"Train/Loss", loss_total / dl_len, epoch)
-        print(epoch,loss_total / dl_len)
+        self.writer.add_scalar(f"Train/gentotalLoss", gen_loss_total / dl_len, epoch)
+        self.writer.add_scalar(f"Train/distotalLoss", dis_loss_total / dl_len, epoch)
+        # self.writer.add_scalar(f"Train/Loss", loss_total / dl_len, epoch)
+
     @torch.no_grad()
     def _validation_epoch(self, epoch):
         visualize_audio_limit = self.validation_custom_config["visualize_audio_limit"]
@@ -60,29 +106,40 @@ class Trainer(BaseTrainer):
         pesq_c_n = []
         pesq_c_e = []
 
-        for i, (mixture, clean, name) in enumerate(self.validation_data_loader):
+        for i, (mixture, clean, name, max_bone, max_air) in enumerate(self.validation_data_loader):
             assert len(name) == 1, "Only support batch size is 1 in enhancement stage."
             name = name[0]
             padded_length = 0
-            mixture1 = np.squeeze(mixture)
-            clean1 = np.squeeze(clean)
-            d = max(len(mixture1) // 4096 + 1, 2) * 4096
-            mixture1 = np.hstack((mixture1, np.zeros(d - len(mixture1))))
-            x = frame(mixture1, 8192, 4096)[:, np.newaxis, :]
-            x = torch.tensor(x)
-            x = x.to(self.device)  # [1, 1, T]
-            x = x.float()
-            d = max(len(clean1) // 4096 + 1, 2) * 4096
-            clean1 = np.hstack((clean1, np.zeros(d - len(clean1))))
+
+            mixture = mixture.to(self.device)  # [1, 1, T]
+            clean = clean.to(self.device)
+            max_bone = max_bone.to(self.device)
+            max_air = max_air.to(self.device)
             # The input of the model should be fixed length.
-            enhanced = self.model(x)
-            enhanced = overlap_add(enhanced, 8192, 4096, (1, 1, len(mixture1)))
-            # enhanced = enhanced.reshape(-1).numpy()
-            enhanced = np.squeeze(enhanced.detach().cpu().numpy())
-            # enhanced = enhanced.detach().cpu()
-            enhanced = enhanced.reshape(-1)
-            clean = clean1.reshape(-1)
-            mixture = mixture1.reshape(-1)
+            if mixture.size(-1) % sample_length != 0:
+                padded_length = sample_length - (mixture.size(-1) % sample_length)
+                mixture = torch.cat([mixture, torch.zeros(1, 1, padded_length, device=self.device)], dim=-1)
+
+            assert mixture.size(-1) % sample_length == 0 and mixture.dim() == 3
+            mixture_chunks = list(torch.split(mixture, sample_length, dim=-1))
+
+            enhanced_chunks = []
+            for chunk in mixture_chunks:
+                output = self.model(chunk)
+                output = output * max_bone
+                # enhanced_chunks.append(self.model(chunk).detach().cpu())
+                enhanced_chunks.append(output)
+            enhanced = torch.cat(enhanced_chunks, dim=-1)  # [1, 1, T]
+            if padded_length != 0:
+                enhanced = enhanced[:, :, :-padded_length]
+                mixture = mixture[:, :, :-padded_length]
+
+            clean = clean * max_air
+            mixture = mixture * max_bone
+            enhanced = enhanced.detach().cpu()
+            enhanced = enhanced.reshape(-1).numpy()
+            clean = clean.cpu().numpy().reshape(-1)
+            mixture = mixture.cpu().numpy().reshape(-1)
 
             assert len(mixture) == len(enhanced) == len(clean)
 
