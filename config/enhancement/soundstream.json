@@ -1,0 +1,20 @@
+{
+    "model": {
+        "module": "model.dccrn",
+        "main": "DCCRN",
+        "args": {}
+    },
+    "dataset": {
+        "module": "dataset.waveform_dataset_enhancement_dccrn8k",
+        "main": "WaveformDataset",
+        "args": {
+            "dataset": "F:\\yhc\\bone\\ceshisoundstream.txt",
+            "limit": 20,
+            "offset": 0,
+            "sample_length": 8000
+        }
+    },
+    "custom": {
+        "sample_length": 8000
+    }
+}

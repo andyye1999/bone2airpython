@@ -1,0 +1,22 @@
+{
+    "model": {
+        "module": "modules.seanettest",
+        "main": "seanet3",
+        "args": {}
+    },
+    "dataset": {
+        "module": "dataset.waveform_dataset_enhancement_seanet",
+        "main": "WaveformDataset",
+        "args": {
+            "dataset": "F:\\yhc\\bone\\ceshinoisysoundstream.txt",
+            "limit": 5,
+            "offset": 0,
+            "sample_length": 1024
+        }
+    },
+    "custom": {
+        "sample_length": 5120,
+        "frame_lenth" : 5120,
+        "hop_lenth" : 1024
+    }
+}

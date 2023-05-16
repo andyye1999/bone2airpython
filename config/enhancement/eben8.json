@@ -1,0 +1,20 @@
+{
+    "model": {
+        "module": "src.generator",
+        "main": "Generatorseanet1",
+        "args": {}
+    },
+    "dataset": {
+        "module": "dataset.waveform_dataset_enhancement_eben",
+        "main": "WaveformDataset",
+        "args": {
+            "dataset": "F:\\yhc\\bone\\ceshi.txt",
+            "limit": null,
+            "offset": 0,
+            "sample_length": 1024
+        }
+    },
+    "custom": {
+        "sample_length": 1024
+    }
+}

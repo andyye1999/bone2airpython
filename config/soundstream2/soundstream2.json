@@ -4,29 +4,29 @@
     "root_dir": "F:\\yhc\\bone",
     "cudnn_deterministic": false,
     "trainer": {
-        "module": "trainer.trainer_tunet",
+        "module": "trainer.trainer_soundstream1",
         "main": "Trainer",
         "epochs": 1000,
-        "save_checkpoint_interval": 10,
+        "save_checkpoint_interval": 5,
         "validation": {
-            "interval": 10,
+            "interval": 5,
             "find_max": true,
             "custom": {
                 "visualize_audio_limit": 10,
                 "visualize_waveform_limit": 10,
                 "visualize_spectrogram_limit": 10,
-                "sample_length": 8192
+                "sample_length": 8000
             }
         }
     },
     "model": {
-        "module": "model.tunet",
-        "main": "TUNet",
-        "args": {}
+        "module": "src.generator",
+        "main": "GeneratorEBEN",
+        "args": {"bands_nbr": 4,"pqmf_ks": 32}
     },
     "loss_function": {
         "module": "model.loss",
-        "main": "tunetloss",
+        "main": "generator_loss",
         "args": {}
     },
     "optimizer": {
@@ -35,21 +35,21 @@
         "beta2": 0.999
     },
     "train_dataset": {
-        "module": "dataset.waveform_dataset_tunet",
+        "module": "dataset.waveform_dataset_soundstream",
         "main": "Dataset",
         "args": {
-            "dataset": "F:\\yhc\\bone\\bonetrainset.txt",
+            "dataset": "F:\\yhc\\bone\\vctktrainset.txt",
             "limit": null,
             "offset": 0,
-            "sample_length": 16000,
+            "sample_length": 8000,
             "mode": "train"
         }
     },
     "validation_dataset": {
-        "module": "dataset.waveform_dataset_tunet",
+        "module": "dataset.waveform_dataset_soundstream",
         "main": "Dataset",
         "args": {
-            "dataset": "F:\\yhc\\bone\\bonetestset.txt",
+            "dataset": "F:\\yhc\\bone\\vctktestset.txt",
             "limit": 400,
             "offset": 0,
             "mode": "validation"
