@@ -77,6 +77,8 @@ def initialize_config(module_cfg, pass_args=True):
 def compute_PESQ(clean_signal, noisy_signal, sr=16000):
     return pesq(sr, clean_signal, noisy_signal, "wb")
 
+def compute_PESQ8k(clean_signal, noisy_signal, sr=8000):
+    return pesq(sr, clean_signal, noisy_signal, "nb")
 
 def z_score(m):
     mean = np.mean(m)
@@ -113,6 +115,19 @@ def sample_fixed_length_data_aligned(data_a, data_b, sample_length):
 
     return data_a[start:end], data_b[start:end]
 
+def sample_fixed_length_data_alignedss(data_a, sample_length):
+    """sample with fixed length from two dataset
+    """
+    # assert len(data_a) == len(data_b), "Inconsistent dataset length, unable to sampling"
+    assert len(data_a) >= sample_length, f"len(data_a) is {len(data_a)}, sample_length is {sample_length}."
+
+    frames_total = len(data_a)
+
+    start = np.random.randint(frames_total - sample_length + 1)
+    # print(f"Random crop from: {start}")
+    end = start + sample_length
+
+    return data_a[start:end]
 
 def compute_STOI(clean_signal, noisy_signal, sr=16000):
     return stoi(clean_signal, noisy_signal, sr, extended=False)
@@ -157,6 +172,16 @@ def normalize_data(data_a, data_b):
     tmpb = 1 / max_b if max_b != 0 else 0
 
     return data_a * tmpa, data_b * tmpb, max_a, max_b
+
+def normalize_data_ss(data_a):
+    """normalize data_a and data_b by dividing by their maximum values
+    """
+    max_a = np.max(data_a)
+
+    tmpa = 1 / max_a if max_a != 0 else 0
+
+
+    return data_a * tmpa, max_a
 
 def normalize_data_enhance(data_a):
     """normalize data_a and data_b by dividing by their maximum values
