@@ -16,7 +16,7 @@ Parameters
 parser = argparse.ArgumentParser("Wave-U-Net: Speech Enhancement")
 parser.add_argument("-C", "--config", default= "F:\\yhc\\bone\\config\\enhancement\\eben8.json", type=str, help="Model and dataset for enhancement (*.json).")
 parser.add_argument("-D", "--device", default="-1", type=str, help="GPU for speech enhancement. default: CPU")
-parser.add_argument("-O", "--output_dir", default= "F:\\yhc\\bone\\enhanced\\eben9", type=str, help="Where are audio save.")
+parser.add_argument("-O", "--output_dir", default= "F:\\yhc\\bone\\enhanced\\ebenchunk", type=str, help="Where are audio save.")
 parser.add_argument("-M", "--model_checkpoint_path", default= "F:\\yhc\\bone\\eben9\\checkpoints\\best_model.tar", type=str, help="Checkpoint.")
 args = parser.parse_args()
 
