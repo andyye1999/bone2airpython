@@ -11,7 +11,7 @@ from torch import nn
 import numpy as np
 # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 torch.set_default_tensor_type(torch.FloatTensor)
-
+from thop import profile
 '''
 Import initialized SCM matrix
 '''
@@ -24,6 +24,52 @@ class Encoder(nn.Module):
 
     def __init__(self, auto_encoder = True):
         super(Encoder, self).__init__()
+
+        self.auto_encoder = auto_encoder
+
+        #---------------------------whole learnt-----------------------
+        # self.flc = nn.Linear(self.F, self.F_c, bias=False)
+        # self.flc.weight = nn.Parameter(torch.from_numpy(Sc), requires_grad=self.auto_encoder)
+        #--------------------------------------------------------------
+
+        self.ln = nn.InstanceNorm2d(2, eps=1e-8, affine=True)
+        self.conv_1 = nn.Conv2d(2, 32, kernel_size=(2,5),stride=(1,2),padding=(1,1))
+        self.bn_1 = nn.BatchNorm2d(32, eps=1e-8)
+        self.act_1 = nn.PReLU(32)
+
+        self.conv_2 = nn.Conv2d(32,32,kernel_size=(2,3),stride=(1,2),padding=(1,1))
+        self.bn_2 = nn.BatchNorm2d(32, eps=1e-8)
+        self.act_2 = nn.PReLU(32)
+
+        self.conv_3 = nn.Conv2d(32,32,kernel_size=(2,3),stride=(1,1),padding=(1,1))
+        self.bn_3 = nn.BatchNorm2d(32, eps=1e-8)
+        self.act_3 = nn.PReLU(32)
+
+        self.conv_4 = nn.Conv2d(32,64,kernel_size=(2,3),stride=(1,1),padding=(1,1))
+        self.bn_4 = nn.BatchNorm2d(64, eps=1e-8)
+        self.act_4 = nn.PReLU(64)
+
+        self.conv_5 = nn.Conv2d(64,128,kernel_size=(2,3),stride=(1,1),padding=(1,1))
+        self.bn_5 = nn.BatchNorm2d(128, eps=1e-8)
+        self.act_5 = nn.PReLU(128)
+
+    def forward(self,x):
+        #x.shape = (Bs, F, T, 2)
+        x = x.permute(0,3,2,1) #(Bs, 2, T, F)
+        x = x.to(torch.float32)
+        # x = self.flc(x)
+        # x = self.ln(x)
+        x_1 = self.act_1(self.bn_1(self.conv_1(x)[:,:,:-1,:]))
+        x_2 = self.act_2(self.bn_2(self.conv_2(x_1)[:,:,:-1,:]))
+        x_3 = self.act_3(self.bn_3(self.conv_3(x_2)[:,:,:-1,:]))
+        x_4 = self.act_4(self.bn_4(self.conv_4(x_3)[:,:,:-1,:]))
+        x_5 = self.act_5(self.bn_5(self.conv_5(x_4)[:,:,:-1,:]))
+        return [x_1,x_2,x_3,x_4,x_5]
+
+class Encoder1(nn.Module):
+
+    def __init__(self, auto_encoder = True):
+        super(Encoder1, self).__init__()
 
         self.auto_encoder = auto_encoder
 
@@ -209,35 +255,6 @@ class Imag_Decoder(nn.Module):
         return x_5
 
 
-class SNR_Estimator(nn.Module):
-    def __init__(self, numUnits, insize ,width):
-        super(SNR_Estimator, self).__init__()
-        self.numUnits = numUnits
-        self.insize = insize
-        self.width = width
-        self.LSTM = nn.LSTM(input_size=self.insize, hidden_size=self.numUnits, batch_first=True,
-                                 bidirectional=False)
-        self.conv = nn.Conv1d(self.width, 1, kernel_size=5,
-                  stride=1, padding=2)
-        #.fc = nn.Linear(self.width, 1)
-        self.act = nn.Sigmoid()
-
-    def forward(self, x):
-        # x.shape = (Bs, C, T, F)
-        self.LSTM.flatten_parameters()
-
-        x = x.permute(0, 3, 2, 1)  # (Bs, F, T, C)
-        if not x.is_contiguous():
-            x = x.contiguous()
-        LSTM_input = x.view(x.shape[0] * x.shape[1], x.shape[2], x.shape[3]) #(Bs*F, T, C)
-        inter_LSTM_out = self.LSTM(LSTM_input)[0]
-        dense_in = inter_LSTM_out.view(x.shape[0], self.width, -1)  # (Bs, F, T)
-
-        #dense_in = dense_in.permute(0,2,1)  # (Bs, T, F)
-        dense_out = self.conv(dense_in)
-        dense_out = self.act(dense_out)
-        dense_out = torch.squeeze(dense_out)
-        return dense_out
 
 '''
 DPCRN
@@ -252,7 +269,58 @@ class DPCRN(nn.Module):
         self.dprnn_2 = DPRNN(128, 50, 128)
         self.real_decoder = Real_Decoder()
         self.imag_decoder = Imag_Decoder()
-        self.estimator = SNR_Estimator(1,128,50)
+
+    def forward(self, x):
+        # x --> audio batch
+        # shape --> [Bs, sequence length]
+        x_1 = x
+        encoder_out = self.encoder(x_1)
+        dprnn_out_1 = self.dprnn_1(encoder_out[4])
+        # dprnn_out_2 = self.dprnn_2(dprnn_out_1)
+        # snr_estimated = self.estimator(dprnn_out_2)
+        enh_real = self.real_decoder(dprnn_out_1, encoder_out)
+        enh_imag = self.imag_decoder(dprnn_out_1, encoder_out)
+        enh_real = enh_real.permute(0,3,2,1)
+        enh_imag = enh_imag.permute(0,3,2,1)
+        enh_stft = torch.cat([enh_real, enh_imag], -1)
+        # enh_stft = self.mk_mask(x, torch.squeeze(enh_real), torch.squeeze(enh_imag))
+        return enh_stft
+
+class DPCRN2(nn.Module):
+    #autoencoder = True
+    def __init__(self):
+        super(DPCRN2,self).__init__()
+        self.encoder = Encoder1()
+        self.dprnn_1 = DPRNN(128, 50, 128)
+        self.dprnn_2 = DPRNN(128, 50, 128)
+        self.real_decoder = Real_Decoder()
+        self.imag_decoder = Imag_Decoder()
+
+    def forward(self, x):
+        # x --> audio batch
+        # shape --> [Bs, sequence length]
+        x_1 = x
+        encoder_out = self.encoder(x_1)
+        dprnn_out_1 = self.dprnn_1(encoder_out[4])
+        # dprnn_out_2 = self.dprnn_2(dprnn_out_1)
+        # snr_estimated = self.estimator(dprnn_out_2)
+        enh_real = self.real_decoder(dprnn_out_1, encoder_out)
+        enh_imag = self.imag_decoder(dprnn_out_1, encoder_out)
+        enh_real = enh_real.permute(0,3,2,1)
+        enh_imag = enh_imag.permute(0,3,2,1)
+        enh_stft = torch.cat([enh_real, enh_imag], -1)
+        # enh_stft = self.mk_mask(x, torch.squeeze(enh_real), torch.squeeze(enh_imag))
+        return enh_stft
+
+class DPCRN3(nn.Module):
+    #autoencoder = True
+    def __init__(self):
+        super(DPCRN3,self).__init__()
+        self.encoder = Encoder1()
+        self.dprnn_1 = DPRNN(128, 50, 128)
+        self.dprnn_2 = DPRNN(128, 50, 128)
+        self.real_decoder = Real_Decoder()
+        self.imag_decoder = Imag_Decoder()
 
     def mk_mask(self, noisy_stft, mask_real, mask_imag):
         noisy_real = noisy_stft[:,:,:,0]
@@ -275,7 +343,21 @@ class DPCRN(nn.Module):
         enh_imag = self.imag_decoder(dprnn_out_1, encoder_out)
         enh_real = enh_real.permute(0,3,2,1)
         enh_imag = enh_imag.permute(0,3,2,1)
-        enh_stft = torch.cat([enh_real, enh_imag], -1)
-        # enh_stft = self.mk_mask(x, torch.squeeze(enh_real), torch.squeeze(enh_imag))
+        # enh_stft = torch.cat([enh_real, enh_imag], -1)
+        enh_stft = self.mk_mask(x, torch.squeeze(enh_real), torch.squeeze(enh_imag))
         return enh_stft
 
+if __name__ == '__main__':
+    x = torch.randn(1,16000)
+    input_stft = torch.stft(x, n_fft=400, hop_length=160, win_length=320)
+    model = DPCRN()
+    y = model(input_stft)
+    print(y.shape)
+    # Number of parameters
+    pytorch_total_params = sum(p.numel() for p in model.parameters())
+    print(f"pytorch_total_params: {pytorch_total_params * 1e-6:.2f} Millions")
+
+    flops, params = profile(model, inputs=(input_stft,))
+    print(flops) # 267436032.0   3:73666560.0
+    print(params) # 7823650.0    3:1829010.0
+    print('flops: %.2f M, params: %.2f M' % (flops / 1e6, params / 1e6))
